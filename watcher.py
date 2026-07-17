@@ -75,6 +75,8 @@ def get_json(url: str, with_key: bool = False, retries: int = 3):
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as resp:
                 raw = resp.read()
+                if resp.status == 204 or not raw:   # no data published for date
+                    return None
                 enc = (resp.headers.get("Content-Encoding") or "").lower()
                 if "gzip" in enc or raw[:2] == b"\x1f\x8b":
                     raw = gzip.decompress(raw)
@@ -99,6 +101,8 @@ def qualifying_showtimes():
                 with_key=True)
         except RuntimeError as e:
             print(f"  ! {day}: {e}", file=sys.stderr)
+            continue
+        if not data:                                 # date not published yet
             continue
         for location in data if isinstance(data, list) else [data]:
             for d in location.get("dates", []):
@@ -238,9 +242,11 @@ def send_telegram(text: str, photo: Path | None = None) -> bool:
     if not (token and chat):
         return False
     if photo and photo.exists():
+        # Telegram photo captions max out at 1024 chars
+        caption = text if len(text) <= 1000 else text[:960] + "\n...(truncated)"
         boundary = uuid.uuid4().hex
         parts = b""
-        for name, val in (("chat_id", chat), ("caption", text)):
+        for name, val in (("chat_id", chat), ("caption", caption)):
             parts += (f"--{boundary}\r\nContent-Disposition: form-data; "
                       f"name=\"{name}\"\r\n\r\n{val}\r\n").encode()
         parts += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"photo\"; "
@@ -250,7 +256,8 @@ def send_telegram(text: str, photo: Path | None = None) -> bool:
             f"https://api.telegram.org/bot{token}/sendPhoto", data=parts,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"})
     else:
-        body = urllib.parse.urlencode({"chat_id": chat, "text": text}).encode()
+        body = urllib.parse.urlencode({"chat_id": chat,
+                                       "text": text[:4000]}).encode()
         req = urllib.request.Request(
             f"https://api.telegram.org/bot{token}/sendMessage", data=body,
             headers={"Content-Type": "application/x-www-form-urlencoded"})
@@ -338,13 +345,20 @@ def main() -> None:
         head = ("YOUR SEATS ARE OPEN — The Odyssey IMAX 70mm (Scotiabank MTL)\n"
                 if prime_alerts else
                 "New seats (not in your F–K zone) — The Odyssey IMAX 70mm\n")
-        msg = head + "\n".join(prime_alerts + minor_alerts) + f"\nBook NOW: {BOOKING_LINK}"
+        lines = prime_alerts + minor_alerts
+        if len(lines) > 10:                          # keep push notifications short
+            lines = lines[:10] + [f"...plus {len(lines) - 10} more showtimes"]
+        msg = head + "\n".join(lines) + f"\nBook NOW: {BOOKING_LINK}"
         sent = []
-        if send_telegram(msg, photo=best_photo if prime_alerts else None):
-            sent.append("telegram")
-        if send_twilio(msg):
-            sent.append("twilio")
-        print(f"ALERT sent via {sent or 'NO CHANNEL CONFIGURED'}:\n{msg}")
+        for name, fn in (("telegram", lambda m: send_telegram(
+                              m, photo=best_photo if prime_alerts else None)),
+                         ("twilio", send_twilio)):
+            try:                                     # a failed send must never
+                if fn(msg):                          # crash the run / lose state
+                    sent.append(name)
+            except Exception as e:  # noqa: BLE001
+                print(f"  ! {name} send failed: {e}", file=sys.stderr)
+        print(f"ALERT sent via {sent or 'NO CHANNEL WORKED'}:\n{msg}")
     else:
         print(f"No changes in your target seats across {len(current)} qualifying showtimes.")
 
