@@ -62,7 +62,10 @@ UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
 
 
 def get_json(url: str, with_key: bool = False, retries: int = 3):
+    import gzip
+    import zlib
     headers = {"User-Agent": UA, "Accept": "application/json",
+               "Accept-Encoding": "gzip, deflate",
                "Accept-Language": "en", "Referer": "https://www.cineplex.com/"}
     if with_key:
         headers["Ocp-Apim-Subscription-Key"] = API_KEY
@@ -71,7 +74,13 @@ def get_json(url: str, with_key: bool = False, retries: int = 3):
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.loads(resp.read().decode())
+                raw = resp.read()
+                enc = (resp.headers.get("Content-Encoding") or "").lower()
+                if "gzip" in enc or raw[:2] == b"\x1f\x8b":
+                    raw = gzip.decompress(raw)
+                elif "deflate" in enc:
+                    raw = zlib.decompress(raw, -zlib.MAX_WBITS)
+                return json.loads(raw.decode())
         except Exception as e:  # noqa: BLE001
             last_err = e
             time.sleep(5 * (attempt + 1))
