@@ -127,7 +127,7 @@ def qualifying_showtimes():
                                 "label": start.strftime("%a %b %d, %I:%M %p").replace(" 0", " "),
                                 "showtime_id": m.group(1),
                             }
-        time.sleep(1)  # be polite
+        time.sleep(0.25)  # be polite
 
 
 # ── Seat map + prime-run detection ────────────────────────────────────────
@@ -337,7 +337,7 @@ def main() -> None:
                                     Path("seatmap.png"))
         if not alerted and ALERT_ANY_INCREASE and n > was.get("n", 0):
             minor_alerts.append(f"{show['label']} — {n} seats (outside target zone)")
-        time.sleep(1)
+        time.sleep(0.25)
 
     STATE_FILE.write_text(json.dumps(current, indent=1, sort_keys=True))
 
