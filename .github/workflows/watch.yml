@@ -2,7 +2,7 @@ name: Cineplex seat watch
 
 on:
   schedule:
-    - cron: "*/5 * * * *"    # every 5 min — GitHub's minimum (may still delay a few min)
+    - cron: "*/5 * * * *"    # every 5 min - GitHub's minimum (may still delay a few min)
   workflow_dispatch: {}       # allows manual "Run workflow" button for testing
 
 concurrency:
@@ -44,7 +44,7 @@ jobs:
           git add state.json
           if ! git diff --cached --quiet; then
             git commit -m "update seat state [skip ci]"
-            # another run may have pushed since we checked out — rebase, keeping
+            # another run may have pushed since we checked out - rebase, keeping
             # our (newer) state.json if both changed it
             git pull --rebase -X theirs origin main || true
             git push
