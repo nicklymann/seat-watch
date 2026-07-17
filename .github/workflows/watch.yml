@@ -37,6 +37,7 @@ jobs:
         run: python watcher.py
 
       - name: Save state
+        if: always()          # commit state even if the check step failed
         run: |
           git config user.name "seat-watch-bot"
           git config user.email "actions@users.noreply.github.com"
