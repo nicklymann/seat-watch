@@ -328,31 +328,46 @@ def main() -> None:
         runs = prime_runs(rows, cols)
         good = good_scattered(rows, cols)
         n = total_open(rows)
-        sig = ";".join("+".join(r["labels"]) for r in runs)
-        good_sig = ",".join(s["label"] for s in good)
-        current[show["key"]] = {"n": n, "prime": sig, "good": good_sig}
+        # every open Standard seat in the target rows, by label
+        open_fk = sorted({s["label"] for r in rows
+                          if r["label"].upper() in TARGET_ROWS
+                          for s in r["seats"]
+                          if s["open"] and s["type"] == "Standard"})
+        current[show["key"]] = {"open": ",".join(open_fk), "n": n}
 
         was = prev.get(show["key"], {})
-        was = was if isinstance(was, dict) else {"n": was, "prime": "", "good": ""}
-        seen_runs = set(was.get("prime", "").split(";")) - {""}
-        seen_good = set(was.get("good", "").split(",")) - {""}
-        new_runs = [r for r in runs if "+".join(r["labels"]) not in seen_runs]
-        new_good = [s for s in good if s["label"] not in seen_good]
+        was = was if isinstance(was, dict) else {}
+        if "open" in was:
+            prev_open = set(was["open"].split(",")) - {""}
+        else:                       # old/missing state: baseline quietly this run
+            prev_open = set(open_fk)
+        new_seats = {l for l in open_fk if l not in prev_open}
+
+        # a run only alerts if it contains >= 2 seats that JUST freed —
+        # known blocks growing by one edge seat stay silent
+        fresh_runs = [r for r in runs
+                      if sum(1 for l in r["labels"] if l in new_seats) >= 2]
+        new_central = [s for s in good if s["label"] in new_seats]
         best = f" | best: {'+'.join(runs[0]['labels'])}" if runs else ""
         print(f"  {show['label']}: {n} open, {len(runs)} run(s), "
               f"{len(good)} good central{best}"
-              f"{' | NEW' if (new_runs or new_good) else ''}")
+              f"{' | FRESH' if (fresh_runs or new_central) else ''}")
 
         alerted = False
-        if new_runs:                                  # best case: seats together
-            top = new_runs[0]
+        if fresh_runs:                                # best case: a fresh pair+ together
+            top = fresh_runs[0]
+            freed = [l for l in top["labels"] if l in new_seats]
             prime_alerts.append(f"NEW: {show['label']}: {'+'.join(top['labels'])} "
-                                f"({top['size']} TOGETHER, row {top['row']})")
+                                f"({top['size']} TOGETHER, row {top['row']}; "
+                                f"just freed: {', '.join(freed)})")
             alerted = True
-        elif new_good and len(good) >= MIN_PARTY:     # fallback: separated but central
-            new_set = {s["label"] for s in new_good}
-            fresh = ", ".join(s["label"] for s in new_good[:4])
-            already = [s["label"] for s in good if s["label"] not in new_set]
+        elif (new_central and len(good) >= MIN_PARTY
+              and len(good) - len(new_central) < MIN_PARTY):
+            # separated-but-central seats alert only when the fresh ones COMPLETE
+            # the pair — one more seat next to already-known ones stays silent
+            fresh = ", ".join(s["label"] for s in new_central[:4])
+            already = [s["label"] for s in good
+                       if s["label"] not in new_seats]
             extra = f" + already open: {', '.join(already[:4])}" if already else ""
             prime_alerts.append(f"NEW: {show['label']}: JUST FREED {fresh}{extra} "
                                 f"({len(good)} central seats, separated)")
