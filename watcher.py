@@ -38,7 +38,7 @@ THEATRE_TZ = ZoneInfo("America/Toronto")
 TARGET_ROWS = ("F", "G", "H", "I", "J", "K")  # the rows you want
 MIN_ADJACENT = 2                         # alert on >= this many seats together
 IDEAL_ADJACENT = 3                       # runs this size or bigger rank equal-best
-RUN_MAX_OFF = 10                         # runs must reach within this many columns
+RUN_MAX_OFF = 8                          # runs must reach within this many columns
                                          # of row center (sides are bad seats)
 ROW_PREF = "HIGJFK"                      # row tie-break for "best seat" (middle rows first)
 BEST_SEAT_HOURS = (11, 19)               # best-seat pick considers shows 11 AM–7 PM
