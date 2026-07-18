@@ -38,6 +38,10 @@ THEATRE_TZ = ZoneInfo("America/Toronto")
 TARGET_ROWS = ("F", "G", "H", "I", "J", "K")  # the rows you want
 MIN_ADJACENT = 2                         # alert on >= this many seats together
 IDEAL_ADJACENT = 3                       # runs this size or bigger rank equal-best
+RUN_MAX_OFF = 10                         # runs must reach within this many columns
+                                         # of row center (sides are bad seats)
+ROW_PREF = "HIGJFK"                      # row tie-break for "best seat" (middle rows first)
+BEST_SEAT_HOURS = (11, 19)               # best-seat pick considers shows 11 AM–7 PM
 MIN_PARTY = 2                            # min seats needed, even if separated
 GOOD_SEAT_MAX_OFF = 8                    # a "good" seat sits within this many
                                          # columns of dead center (for separated seats)
@@ -163,11 +167,15 @@ def prime_runs(rows, total_cols):
                 run.append(s)
             else:
                 if len(run) >= MIN_ADJACENT:
-                    mid = (run[0]["col"] + run[-1]["col"]) / 2
-                    found.append({"row": row["label"],
-                                  "labels": [x["label"] for x in run],
-                                  "size": len(run),
-                                  "center_off": round(abs(mid - center), 1)})
+                    # nearest edge of the run to center (sides are bad seats)
+                    near = min(abs(run[0]["col"] - center),
+                               abs(run[-1]["col"] - center))
+                    if near <= RUN_MAX_OFF:
+                        mid = (run[0]["col"] + run[-1]["col"]) / 2
+                        found.append({"row": row["label"],
+                                      "labels": [x["label"] for x in run],
+                                      "size": len(run),
+                                      "center_off": round(abs(mid - center), 1)})
                 run = [s] if (s["open"] and s["type"] == "Standard") else []
     found.sort(key=lambda r: (-min(r["size"], IDEAL_ADJACENT), r["center_off"]))
     return found
@@ -290,7 +298,8 @@ def main() -> None:
         except json.JSONDecodeError:
             pass
 
-    current, prime_alerts, minor_alerts, best_photo = {}, [], [], None
+    current, prime_alerts, minor_alerts = {}, [], []
+    alert_media, best_seat = [], None
     for show in qualifying_showtimes():
         if show["key"] in current:                    # duplicate-entry guard
             continue
@@ -299,6 +308,23 @@ def main() -> None:
         except RuntimeError as e:
             print(f"  ! {show['key']}: {e}", file=sys.stderr)
             continue
+
+        # track the single best open seat (most central, middle rows first)
+        # across daytime/evening shows (11 AM - 7 PM starts)
+        hour = int(show["key"][11:13])
+        if BEST_SEAT_HOURS[0] <= hour <= BEST_SEAT_HOURS[1]:
+            center = (cols - 1) / 2
+            for row in rows:
+                rl = row["label"].upper()
+                if rl not in TARGET_ROWS:
+                    continue
+                rank = ROW_PREF.find(rl)
+                for s in row["seats"]:
+                    if s["open"] and s["type"] == "Standard":
+                        score = (abs(s["col"] - center), rank)
+                        if best_seat is None or score < best_seat["score"]:
+                            best_seat = {"score": score, "label": s["label"],
+                                         "show": show["label"]}
         runs = prime_runs(rows, cols)
         good = good_scattered(rows, cols)
         n = total_open(rows)
@@ -320,7 +346,7 @@ def main() -> None:
         alerted = False
         if new_runs:                                  # best case: seats together
             top = new_runs[0]
-            prime_alerts.append(f"{show['label']}: {'+'.join(top['labels'])} "
+            prime_alerts.append(f"NEW: {show['label']}: {'+'.join(top['labels'])} "
                                 f"({top['size']} TOGETHER, row {top['row']})")
             alerted = True
         elif new_good and len(good) >= MIN_PARTY:     # fallback: separated but central
@@ -328,13 +354,11 @@ def main() -> None:
             fresh = ", ".join(s["label"] for s in new_good[:4])
             already = [s["label"] for s in good if s["label"] not in new_set]
             extra = f" + already open: {', '.join(already[:4])}" if already else ""
-            prime_alerts.append(f"{show['label']}: JUST FREED {fresh}{extra} "
+            prime_alerts.append(f"NEW: {show['label']}: JUST FREED {fresh}{extra} "
                                 f"({len(good)} central seats, separated)")
             alerted = True
-        if alerted and best_photo is None:            # image for the best find
-            best_photo = render_map(rows, cols, runs, good,
-                                    f"The Odyssey IMAX 70mm - {show['label']}",
-                                    Path("seatmap.png"))
+        if alerted:                                   # one image per alerted showtime
+            alert_media.append((show["label"], rows, cols, runs, good))
         if not alerted and ALERT_ANY_INCREASE and n > was.get("n", 0):
             minor_alerts.append(f"{show['label']} — {n} seats (outside target zone)")
         time.sleep(0.25)
@@ -343,21 +367,35 @@ def main() -> None:
 
     if prime_alerts or minor_alerts:
         head = ("YOUR SEATS ARE OPEN — The Odyssey IMAX 70mm (Scotiabank MTL)\n"
+                "(every line below is NEW since the last check)\n"
                 if prime_alerts else
                 "New seats (not in your F–K zone) — The Odyssey IMAX 70mm\n")
         lines = prime_alerts + minor_alerts
         if len(lines) > 10:                          # keep push notifications short
             lines = lines[:10] + [f"...plus {len(lines) - 10} more showtimes"]
-        msg = head + "\n".join(lines) + f"\nBook NOW: {BOOKING_LINK}"
+        msg = head + "\n".join(lines)
+        if best_seat:
+            msg += (f"\nBest single seat right now: {best_seat['label']} "
+                    f"({best_seat['show']})")
+        msg += f"\nBook NOW: {BOOKING_LINK}"
         sent = []
-        for name, fn in (("telegram", lambda m: send_telegram(
-                              m, photo=best_photo if prime_alerts else None)),
-                         ("twilio", send_twilio)):
+        for name, fn in (("telegram", send_telegram), ("twilio", send_twilio)):
             try:                                     # a failed send must never
                 if fn(msg):                          # crash the run / lose state
                     sent.append(name)
             except Exception as e:  # noqa: BLE001
                 print(f"  ! {name} send failed: {e}", file=sys.stderr)
+        # then one captioned seat-map image per alerted showtime (max 3)
+        for label, rows_, cols_, runs_, good_ in alert_media[:3]:
+            try:
+                p = render_map(rows_, cols_, runs_, good_,
+                               f"The Odyssey IMAX 70mm - {label}",
+                               Path("seatmap.png"))
+                if p:
+                    send_telegram(f"Seat map — {label} (gold = your seats)",
+                                  photo=p)
+            except Exception as e:  # noqa: BLE001
+                print(f"  ! map send failed for {label}: {e}", file=sys.stderr)
         print(f"ALERT sent via {sent or 'NO CHANNEL WORKED'}:\n{msg}")
     else:
         print(f"No changes in your target seats across {len(current)} qualifying showtimes.")
