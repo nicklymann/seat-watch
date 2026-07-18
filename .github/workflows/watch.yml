@@ -2,20 +2,21 @@ name: Cineplex seat watch
 
 on:
   schedule:
-    - cron: "*/5 * * * *"    # every 5 min - GitHub's minimum (may still delay a few min)
-  workflow_dispatch: {}       # allows manual "Run workflow" button for testing
+    - cron: "7 * * * *"     # hourly at :07 (hourly crons fire far more reliably
+                            # than */5; each run sweeps every 5 min for the hour)
+  workflow_dispatch: {}      # manual "Run workflow" button for testing
 
 concurrency:
   group: seat-watch
-  cancel-in-progress: false
+  cancel-in-progress: true   # a new hourly run supersedes the old one
 
 permissions:
-  contents: write             # to commit state.json back
+  contents: write            # to commit state.json back
 
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
 
@@ -26,7 +27,7 @@ jobs:
       - name: Install Pillow (seat-map images)
         run: pip install --quiet pillow
 
-      - name: Check seats
+      - name: Watch (12 sweeps, 5 min apart)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -34,18 +35,19 @@ jobs:
           TWILIO_AUTH_TOKEN: ${{ secrets.TWILIO_AUTH_TOKEN }}
           TWILIO_FROM: ${{ secrets.TWILIO_FROM }}
           TWILIO_TO: ${{ secrets.TWILIO_TO }}
-        run: python watcher.py
-
-      - name: Save state
-        if: always()          # commit state even if the check step failed
         run: |
           git config user.name "seat-watch-bot"
           git config user.email "actions@users.noreply.github.com"
-          git add state.json
-          if ! git diff --cached --quiet; then
-            git commit -m "update seat state [skip ci]"
-            # another run may have pushed since we checked out - rebase, keeping
-            # our (newer) state.json if both changed it
-            git pull --rebase -X theirs origin main || true
-            git push
-          fi
+          for i in $(seq 1 12); do
+            echo "=== Sweep $i/12 at $(date -u +%H:%M) UTC ==="
+            python watcher.py || echo "sweep $i failed - continuing"
+            git add state.json
+            if ! git diff --cached --quiet; then
+              git commit -m "update seat state [skip ci]"
+              # another run may have pushed since checkout - rebase, keeping
+              # our (newer) state.json if both changed it
+              git pull --rebase -X theirs origin main || true
+              git push || true
+            fi
+            if [ "$i" -lt 12 ]; then sleep 240; fi
+          done
