@@ -27,7 +27,7 @@ jobs:
       - name: Install Pillow (seat-map images)
         run: pip install --quiet pillow
 
-      - name: Watch (12 sweeps, 5 min apart)
+      - name: Watch (15 sweeps, ~3 min apart)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
@@ -38,8 +38,8 @@ jobs:
         run: |
           git config user.name "seat-watch-bot"
           git config user.email "actions@users.noreply.github.com"
-          for i in $(seq 1 12); do
-            echo "=== Sweep $i/12 at $(date -u +%H:%M) UTC ==="
+          for i in $(seq 1 15); do
+            echo "=== Sweep $i/15 at $(date -u +%H:%M) UTC ==="
             python watcher.py || echo "sweep $i failed - continuing"
             git add state.json
             if ! git diff --cached --quiet; then
@@ -49,5 +49,5 @@ jobs:
               git pull --rebase -X theirs origin main || true
               git push || true
             fi
-            if [ "$i" -lt 12 ]; then sleep 240; fi
+            if [ "$i" -lt 15 ]; then sleep 120; fi
           done
