@@ -136,9 +136,11 @@ def qualifying_showtimes():
                                 "key": start.strftime("%Y-%m-%d %H:%M"),
                                 "label": start.strftime("%a %b %d, %I:%M %p").replace(" 0", " "),
                                 "showtime_id": m.group(1),
-                                # direct-to-checkout link (same URL Cineplex's own
-                                # Book button uses) — skips all site navigation
-                                "book_url": sess.get("ticketingUrl") or BOOKING_LINK,
+                                # deep link to this showtime's live seat map with
+                                # its Buy Tickets button (works without a session)
+                                "book_url": (f"https://www.cineplex.com/ticketing/preview"
+                                             f"?locationId={LOCATION_ID}"
+                                             f"&showtimeId={m.group(1)}&dbox=false"),
                             }
         time.sleep(0.25)  # be polite
 
