@@ -46,6 +46,8 @@ MIN_PARTY = 2                            # min seats needed, even if separated
 GOOD_SEAT_MAX_OFF = 8                    # a "good" seat sits within this many
                                          # columns of dead center (for separated seats)
 ALERT_ANY_INCREASE = False               # True = also alert on any new seats anywhere
+MIN_LEAD_MINUTES = 30                    # ignore shows already started or starting
+                                         # sooner than this (no useless alerts)
 
 STATE_FILE = Path(__file__).parent / "state.json"
 
@@ -121,6 +123,10 @@ def qualifying_showtimes():
                             start = datetime.fromisoformat(sess["showStartDateTime"])
                             is_weekend = start.weekday() >= 5
                             if not is_weekend and start.hour < WEEKDAY_EARLIEST_HOUR:
+                                continue
+                            # skip shows already started / starting too soon
+                            now_local = datetime.now(THEATRE_TZ).replace(tzinfo=None)
+                            if (start - now_local).total_seconds() < MIN_LEAD_MINUTES * 60:
                                 continue
                             m = re.search(r"showtimeId=(\d+)",
                                           sess.get("seatMapUrl", ""), re.I)
