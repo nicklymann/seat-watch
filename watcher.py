@@ -38,12 +38,13 @@ THEATRE_TZ = ZoneInfo("America/Toronto")
 TARGET_ROWS = ("F", "G", "H", "I", "J", "K")  # the rows you want
 MIN_ADJACENT = 2                         # alert on >= this many seats together
 IDEAL_ADJACENT = 3                       # runs this size or bigger rank equal-best
-RUN_MAX_OFF = 8                          # runs must reach within this many columns
+RUN_MAX_OFF = 10                         # runs must reach within this many columns
                                          # of row center (sides are bad seats)
+BORDERLINE_OFF = 8                       # finds beyond this get tagged [borderline]
 ROW_PREF = "HIGJFK"                      # row tie-break for "best seat" (middle rows first)
 BEST_SEAT_HOURS = (11, 19)               # best-seat pick considers shows 11 AM–7 PM
 MIN_PARTY = 2                            # min seats needed, even if separated
-GOOD_SEAT_MAX_OFF = 8                    # a "good" seat sits within this many
+GOOD_SEAT_MAX_OFF = 10                   # a "good" seat sits within this many
                                          # columns of dead center (for separated seats)
 ALERT_ANY_INCREASE = False               # True = also alert on any new seats anywhere
 MIN_LEAD_MINUTES = 30                    # ignore shows already started or starting
@@ -185,7 +186,7 @@ def prime_runs(rows, total_cols):
                         mid = (run[0]["col"] + run[-1]["col"]) / 2
                         found.append({"row": row["label"],
                                       "labels": [x["label"] for x in run],
-                                      "size": len(run),
+                                      "size": len(run), "near": near,
                                       "center_off": round(abs(mid - center), 1)})
                 run = [s] if (s["open"] and s["type"] == "Standard") else []
     found.sort(key=lambda r: (-min(r["size"], IDEAL_ADJACENT), r["center_off"]))
@@ -368,8 +369,9 @@ def main() -> None:
         if fresh_runs:                                # best case: a fresh pair+ together
             top = fresh_runs[0]
             freed = [l for l in top["labels"] if l in new_seats]
+            tag = " [borderline, side-ish]" if top.get("near", 0) > BORDERLINE_OFF else ""
             prime_alerts.append(f"NEW: {show['label']}: {'+'.join(top['labels'])} "
-                                f"({top['size']} TOGETHER, row {top['row']}; "
+                                f"({top['size']} TOGETHER, row {top['row']}{tag}; "
                                 f"just freed: {', '.join(freed)})\n"
                                 f"➜ BOOK THIS SHOW: {show['book_url']}")
             alerted = True
@@ -377,12 +379,15 @@ def main() -> None:
               and len(good) - len(new_central) < MIN_PARTY):
             # separated-but-central seats alert only when the fresh ones COMPLETE
             # the pair — one more seat next to already-known ones stays silent
-            fresh = ", ".join(s["label"] for s in new_central[:4])
-            already = [s["label"] for s in good
+            def mark(s):                              # ~ prefix = borderline seat
+                return ("~" if s["off"] > BORDERLINE_OFF else "") + s["label"]
+            fresh = ", ".join(mark(s) for s in new_central[:4])
+            already = [mark(s) for s in good
                        if s["label"] not in new_seats]
             extra = f" + already open: {', '.join(already[:4])}" if already else ""
             prime_alerts.append(f"NEW: {show['label']}: JUST FREED {fresh}{extra} "
-                                f"({len(good)} central seats, separated)\n"
+                                f"({len(good)} central-ish seats, separated; "
+                                f"~ = more side-ish)\n"
                                 f"➜ BOOK THIS SHOW: {show['book_url']}")
             alerted = True
         if alerted:                                   # one image per alerted showtime
