@@ -136,6 +136,9 @@ def qualifying_showtimes():
                                 "key": start.strftime("%Y-%m-%d %H:%M"),
                                 "label": start.strftime("%a %b %d, %I:%M %p").replace(" 0", " "),
                                 "showtime_id": m.group(1),
+                                # direct-to-checkout link (same URL Cineplex's own
+                                # Book button uses) — skips all site navigation
+                                "book_url": sess.get("ticketingUrl") or BOOKING_LINK,
                             }
         time.sleep(0.25)  # be polite
 
@@ -365,7 +368,8 @@ def main() -> None:
             freed = [l for l in top["labels"] if l in new_seats]
             prime_alerts.append(f"NEW: {show['label']}: {'+'.join(top['labels'])} "
                                 f"({top['size']} TOGETHER, row {top['row']}; "
-                                f"just freed: {', '.join(freed)})")
+                                f"just freed: {', '.join(freed)})\n"
+                                f"➜ BOOK THIS SHOW: {show['book_url']}")
             alerted = True
         elif (new_central and len(good) >= MIN_PARTY
               and len(good) - len(new_central) < MIN_PARTY):
@@ -376,7 +380,8 @@ def main() -> None:
                        if s["label"] not in new_seats]
             extra = f" + already open: {', '.join(already[:4])}" if already else ""
             prime_alerts.append(f"NEW: {show['label']}: JUST FREED {fresh}{extra} "
-                                f"({len(good)} central seats, separated)")
+                                f"({len(good)} central seats, separated)\n"
+                                f"➜ BOOK THIS SHOW: {show['book_url']}")
             alerted = True
         if alerted:                                   # one image per alerted showtime
             alert_media.append((show["label"], rows, cols, runs, good))
