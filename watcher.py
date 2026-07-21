@@ -49,6 +49,11 @@ GOOD_SEAT_MAX_OFF = 10                   # a "good" seat sits within this many
 ALERT_ANY_INCREASE = False               # True = also alert on any new seats anywhere
 MIN_LEAD_MINUTES = 30                    # ignore shows already started or starting
                                          # sooner than this (no useless alerts)
+HOT_DAYS = 10                            # "hot" sweeps only check this many days out
+REPEAT_ALERTS = 2                        # extra pushes per real alert (missed-ding insurance)
+# Already booked Aug 14 (H21-24). Only hunt for an EARLIER upgrade — ignore this
+# date and anything after it. Set to None to watch the full window again.
+WATCH_BEFORE = "2026-08-14"              # only shows strictly before this date
 
 STATE_FILE = Path(__file__).parent / "state.json"
 
@@ -97,10 +102,14 @@ def get_json(url: str, with_key: bool = False, retries: int = 3):
 
 
 # ── Showtime discovery ────────────────────────────────────────────────────
-def qualifying_showtimes():
+def qualifying_showtimes(days_ahead=None):
     today = datetime.now(THEATRE_TZ).date()
-    for offset in range(DAYS_AHEAD + 1):
+    cutoff = (datetime.strptime(WATCH_BEFORE, "%Y-%m-%d").date()
+              if WATCH_BEFORE else None)
+    for offset in range((DAYS_AHEAD if days_ahead is None else days_ahead) + 1):
         day = today + timedelta(days=offset)
+        if cutoff and day >= cutoff:                 # stop at the already-booked date
+            break
         date_str = f"{day.month}/{day.day}/{day.year}"     # API wants M/D/YYYY
         try:
             data = get_json(SHOWTIMES_URL.format(
@@ -258,9 +267,20 @@ def render_map(rows, total_cols, runs, good, label, path: Path):
 
 # ── Alert channels ────────────────────────────────────────────────────────
 def send_telegram(text: str, photo: Path | None = None) -> bool:
-    token, chat = os.environ.get("TELEGRAM_BOT_TOKEN"), os.environ.get("TELEGRAM_CHAT_ID")
-    if not (token and chat):
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    # comma-separated chat IDs -> alert multiple phones (you + dad)
+    chats = [c.strip() for c in (os.environ.get("TELEGRAM_CHAT_ID") or "").split(",")
+             if c.strip()]
+    if not (token and chats):
         return False
+    ok = False
+    for chat in chats:
+        if _tg_send_one(token, chat, text, photo):
+            ok = True
+    return ok
+
+
+def _tg_send_one(token, chat, text, photo):
     if photo and photo.exists():
         # Telegram photo captions max out at 1024 chars
         caption = text if len(text) <= 1000 else text[:960] + "\n...(truncated)"
